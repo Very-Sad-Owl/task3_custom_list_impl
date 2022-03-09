@@ -4,6 +4,9 @@ import ru.clevertec.custom_collection.exception.UnsupportedActionExcepton;
 
 import java.io.Serializable;
 import java.util.*;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.UnaryOperator;
 
 /**
@@ -16,7 +19,6 @@ import java.util.function.UnaryOperator;
  * @see     Collection
  * @see     LinkedList
  * @see     Vector
- * @since   1.8
  */
 
 public class LinkedListImpl<T> extends AbstractSequentialList<T>
@@ -39,22 +41,24 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
     private Node<T> tail;
 
     /**
-     * Returns the first element in this list.
-     *
-     * @return the first element in this list
+     * Separate lockers for reading and writing.
+     * Only a single thread at a time (a writer thread) can modify the shared data,
+     * while any number of threads can concurrently read the data(reader threads).
      */
-    public Node<T> getHead() {
-        return head;
-    }
+    private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
     /**
-     * Returns the last element in this list.
-     *
-     * @return the last element in this list
+     * If no threads have locked the ReadWriteLock for writing,
+     * and no thread have requested a write lock,
+     * multiple threads can lock the lock for reading.
      */
-    public Node<T> getTail() {
-        return tail;
-    }
+    private final Lock readLock = lock.readLock();
+
+    /**
+     * If no threads are reading or writing,
+     * only one thread at a time can lock the lock for writing.
+     */
+    private final Lock writeLock = lock.writeLock();
 
     /**
      * Constructs an empty list.
@@ -71,7 +75,12 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public void add(int index, T element) {
-        insertNode(index, element);
+        writeLock.lock();
+        try {
+            insertNode(index, element);
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     /**
@@ -86,13 +95,18 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public boolean addAll(int index, Collection<? extends T> c) {
-        if (c.isEmpty()) {
-            return false;
-        } else {
-            for (T element : c) {
-                add(index++, element);
+        writeLock.lock();
+        try {
+            if (c.isEmpty()) {
+                return false;
+            } else {
+                for (T element : c) {
+                    add(index++, element);
+                }
+                return true;
             }
-            return true;
+        }finally {
+            writeLock.unlock();
         }
     }
 
@@ -114,7 +128,12 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public T get(int index) {
-        return getNode(index).element;
+        readLock.lock();
+        try {
+            return getNode(index).element;
+        } finally {
+            readLock.unlock();
+        }
     }
 
     /**
@@ -127,9 +146,14 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public T set(int index, T element) {
-        isValidIndex(index);
-        getNode(index).element = element;
-        return element;
+        writeLock.lock();
+        try {
+            isValidIndex(index);
+            getNode(index).element = element;
+            return element;
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     /**
@@ -139,7 +163,12 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public int size() {
-        return size;
+        readLock.lock();
+        try {
+            return size;
+        } finally {
+            readLock.unlock();
+        }
     }
 
     /**
@@ -149,7 +178,12 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public boolean isEmpty() {
-        return size == 0;
+        readLock.lock();
+        try {
+            return size == 0;
+        } finally {
+            readLock.unlock();
+        }
     }
 
     /**
@@ -160,7 +194,12 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public boolean contains(Object o) {
-        return indexOf(o) >= 0;
+        readLock.lock();
+        try {
+            return indexOf(o) >= 0;
+        } finally {
+            readLock.unlock();
+        }
     }
 
     /**
@@ -169,26 +208,31 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public int indexOf(Object o) {
-        int index = 0;
-        Node<T> currentNode = head;
-        if (o == null) {
-            while (currentNode != null) {
-                if (currentNode.element == null) {
-                    return index;
+        readLock.lock();
+        try {
+            int index = 0;
+            Node<T> currentNode = head;
+            if (o == null) {
+                while (currentNode != null) {
+                    if (currentNode.element == null) {
+                        return index;
+                    }
+                    currentNode = currentNode.previousNode;
+                    index++;
                 }
-                currentNode = currentNode.previousNode;
-                index++;
-            }
-        } else {
-            while (currentNode != null) {
-                if (o.equals(currentNode.element)) {
-                    return index;
+            } else {
+                while (currentNode != null) {
+                    if (o.equals(currentNode.element)) {
+                        return index;
+                    }
+                    currentNode = currentNode.previousNode;
+                    index++;
                 }
-                currentNode = currentNode.previousNode;
-                index++;
             }
+            return -1;
+        } finally {
+            readLock.unlock();
         }
-        return -1;
     }
 
     /**
@@ -201,7 +245,12 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public boolean removeFirstOccurrence(Object o) {
-        return remove(o);
+        writeLock.lock();
+        try {
+            return remove(o);
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     /**
@@ -214,26 +263,30 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public boolean removeLastOccurrence(Object o) {
-        Node<T> currentNode = tail;
-        if (o == null) {
-            while (currentNode != null) {
-                if (currentNode.element == null) {
-                    deleteNode(currentNode);
-                    return true;
+        writeLock.lock();
+        try {
+            Node<T> currentNode = tail;
+            if (o == null) {
+                while (currentNode != null) {
+                    if (currentNode.element == null) {
+                        deleteNode(currentNode);
+                        return true;
+                    }
+                    currentNode = currentNode.nextNode;
                 }
-                currentNode = currentNode.nextNode;
-            }
-        } else {
-            while (currentNode != null) {
-                if (o.equals(currentNode.element)) {
-                    deleteNode(currentNode);
-                    return true;
+            } else {
+                while (currentNode != null) {
+                    if (o.equals(currentNode.element)) {
+                        deleteNode(currentNode);
+                        return true;
+                    }
+                    currentNode = currentNode.nextNode;
                 }
-                currentNode = currentNode.nextNode;
             }
+            return false;
+        } finally {
+            writeLock.unlock();
         }
-        return false;
-
     }
 
     /**
@@ -245,8 +298,13 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
     @Override
     @SuppressWarnings("unchecked")
     public boolean add(Object o) {
-        insertNode(size, (T)o);
-        return true;
+        writeLock.lock();
+        try {
+            insertNode(size, (T) o);
+            return true;
+        } finally {
+            writeLock.unlock();
+        }
     }
 
 
@@ -258,12 +316,15 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
     @Override
     @SuppressWarnings("unchecked")
     public void addFirst(Object o) {
+        writeLock.lock();
         try {
             Node<T> newNode = new Node<>((T) o);
             newNode.setNextNode(head);
             head = newNode;
-        } catch (Exception e){
+        } catch (Exception e) {
             throw new IllegalArgumentException();
+        } finally {
+            writeLock.unlock();
         }
     }
 
@@ -277,12 +338,15 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
     @Override
     @SuppressWarnings("unchecked")
     public void addLast(Object o) {
+        writeLock.lock();
         try {
             Node<T> newNode = new Node<>((T) o);
             newNode.setPreviousNode(tail);
             tail = newNode;
         } catch (Exception e){
             throw new IllegalArgumentException();
+        } finally {
+            writeLock.unlock();
         }
     }
 
@@ -294,7 +358,12 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public T removeFirst() {
-        return remove(0);
+        writeLock.lock();
+        try {
+            return remove(0);
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     /**
@@ -305,7 +374,12 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public T removeLast() {
-        return remove(size - 1);
+        writeLock.lock();
+        try {
+            return remove(size - 1);
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     /**
@@ -316,8 +390,13 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public T getFirst() {
-        if (head == null) throw new NoSuchElementException();
-        return head.element;
+        readLock.lock();
+        try {
+            if (head == null) throw new NoSuchElementException();
+            return head.element;
+        } finally {
+            readLock.unlock();
+        }
     }
 
     /**
@@ -328,8 +407,13 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public T getLast() {
-        if (tail == null) throw new NoSuchElementException();
-        return tail.element;
+        readLock.lock();
+        try {
+            if (tail == null) throw new NoSuchElementException();
+            return tail.element;
+        } finally {
+            readLock.unlock();
+        }
     }
 
     /**
@@ -340,7 +424,12 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public T element() {
-        return getFirst();
+        readLock.lock();
+        try {
+            return getFirst();
+        } finally {
+            readLock.unlock();
+        }
     }
 
     /**
@@ -352,7 +441,12 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public T remove() {
-        return removeFirst();
+        writeLock.lock();
+        try {
+            return removeFirst();
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     /**
@@ -365,13 +459,18 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public boolean addAll(Collection c) {
-        if (c.isEmpty()) {
-            return false;
-        } else {
-            for (Object element : c) {
-                add(element);
+        writeLock.lock();
+        try {
+            if (c.isEmpty()) {
+                return false;
+            } else {
+                for (Object element : c) {
+                    add(element);
+                }
+                return true;
             }
-            return true;
+        } finally {
+            writeLock.unlock();
         }
     }
 
@@ -385,25 +484,30 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public boolean remove(Object o) {
-        Node<T> currentNode = head;
-        if (o == null) {
-            while (currentNode != null) {
-                if (currentNode.element == null) {
-                    deleteNode(currentNode);
-                    return true;
+        writeLock.lock();
+        try {
+            Node<T> currentNode = head;
+            if (o == null) {
+                while (currentNode != null) {
+                    if (currentNode.element == null) {
+                        deleteNode(currentNode);
+                        return true;
+                    }
+                    currentNode = currentNode.previousNode;
                 }
-                currentNode = currentNode.previousNode;
-            }
-        } else {
-            while (currentNode != null) {
-                if (o.equals(currentNode.element)) {
-                    deleteNode(currentNode);
-                    return true;
+            } else {
+                while (currentNode != null) {
+                    if (o.equals(currentNode.element)) {
+                        deleteNode(currentNode);
+                        return true;
+                    }
+                    currentNode = currentNode.previousNode;
                 }
-                currentNode = currentNode.previousNode;
             }
+            return false;
+        } finally {
+            writeLock.unlock();
         }
-        return false;
     }
 
     /**
@@ -415,9 +519,14 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public T remove(int index) {
-        Node<T> node = getNode(index);
-        if (!deleteNode(node)) throw new NoSuchElementException();
-        return node.element;
+        writeLock.lock();
+        try {
+            Node<T> node = getNode(index);
+            if (!deleteNode(node)) throw new NoSuchElementException();
+            return node.element;
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     /**
@@ -429,19 +538,19 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public Object[] toArray() {
-        int index = 0;
-        Object[] array = new Object[size];
-        Node<T> currentNode = head;
-        while (currentNode != null) {
-            array[index++] = currentNode.element;
-            currentNode = currentNode.previousNode;
+        readLock.lock();
+        try {
+            int index = 0;
+            Object[] array = new Object[size];
+            Node<T> currentNode = head;
+            while (currentNode != null) {
+                array[index++] = currentNode.element;
+                currentNode = currentNode.previousNode;
+            }
+            return array;
+        } finally {
+            readLock.unlock();
         }
-        return array;
-    }
-
-    @Override
-    public Object[] toArray(Object[] a) {
-        return new Object[0];
     }
 
     /**
@@ -451,7 +560,12 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public Iterator<T> iterator() {
-        return new IteratorImpl();
+        readLock.lock();
+        try {
+            return new IteratorImpl();
+        } finally {
+            readLock.unlock();
+        }
     }
 
     @Override
@@ -474,6 +588,7 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      *
      * @param objects array of objects list to be initialized with
      */
+    @SafeVarargs
     static <T> List<T> of(T... objects) {
         List<T> list = new LinkedListImpl<>();
         list.addAll(Arrays.asList(objects));
@@ -489,10 +604,13 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public boolean offerFirst(Object o) {
+        writeLock.lock();
         try {
             addFirst(o);
         } catch (IllegalArgumentException e){
             return false;
+        } finally {
+            writeLock.unlock();
         }
         return true;
     }
@@ -505,10 +623,13 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public boolean offerLast(Object o) {
+        writeLock.lock();
         try {
             addLast(o);
         } catch (IllegalArgumentException e){
             return false;
+        } finally {
+            writeLock.unlock();
         }
         return true;
     }
@@ -522,13 +643,18 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public T pollFirst() {
-        T removed;
-        try{
-            removed = remove(0) ;
-        } catch (IllegalArgumentException e){
-            return null;
+        writeLock.lock();
+        try {
+            T removed;
+            try {
+                removed = remove(0);
+            } catch (IllegalArgumentException e) {
+                return null;
+            }
+            return removed;
+        } finally {
+            writeLock.unlock();
         }
-        return removed;
     }
 
     /**
@@ -538,13 +664,18 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public T pollLast() {
-        T removed;
-        try{
-            removed = remove(size - 1) ;
-        } catch (IllegalArgumentException e){
-            return null;
+        writeLock.lock();
+        try {
+            T removed;
+            try {
+                removed = remove(size - 1);
+            } catch (IllegalArgumentException e) {
+                return null;
+            }
+            return removed;
+        } finally {
+            writeLock.unlock();
         }
-        return removed;
     }
 
     /**
@@ -554,7 +685,12 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public T peekFirst() {
-        return head.element;
+        readLock.lock();
+        try {
+            return head.element;
+        } finally {
+            readLock.unlock();
+        }
     }
 
     /**
@@ -564,7 +700,12 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public T peekLast() {
-        return tail.element;
+        readLock.lock();
+        try {
+            return tail.element;
+        } finally {
+            readLock.unlock();
+        }
     }
 
     /**
@@ -575,10 +716,13 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public boolean offer(T o) {
+        writeLock.lock();
         try{
             add(o);
         } catch (IllegalArgumentException e){
             return false;
+        } finally {
+            writeLock.unlock();
         }
         return true;
     }
@@ -591,9 +735,14 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public T poll() {
-        Node<T> oldHead = head;
-        remove(head);
-        return oldHead.element;
+        writeLock.lock();
+        try {
+            Node<T> oldHead = head;
+            remove(head);
+            return oldHead.element;
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     /**
@@ -603,7 +752,12 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public T peek() {
-        return head.element;
+        readLock.lock();
+        try {
+            return head.element;
+        } finally {
+            readLock.unlock();
+        }
     }
 
     /**
@@ -616,7 +770,12 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public void push(T o) {
-        addFirst(o);
+        writeLock.lock();
+        try {
+            addFirst(o);
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     /**
@@ -631,7 +790,12 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
      */
     @Override
     public T pop() {
-        return removeLast();
+        writeLock.lock();
+        try {
+            return removeLast();
+        } finally {
+            writeLock.unlock();
+        }
     }
 
 //    @Override

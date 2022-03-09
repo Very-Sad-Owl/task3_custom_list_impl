@@ -3,6 +3,9 @@ package ru.clevertec.custom_collection.my_list;
 import java.io.Serializable;
 import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * <p>Created as Task 3 for Clevertec.</p>
@@ -14,7 +17,6 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * @see     Collection
  * @see     List
  * @see     Vector
- * @since   1.8
  */
 
 public class ArrayListImpl<T> extends AbstractList<T>
@@ -42,6 +44,26 @@ public class ArrayListImpl<T> extends AbstractList<T>
      * The size of the ArrayList (the number of elements it contains).
      */
     private int size;
+
+    /**
+     * Separate lockers for reading and writing.
+     * Only a single thread at a time (a writer thread) can modify the shared data,
+     * while any number of threads can concurrently read the data(reader threads).
+     */
+    private final ReadWriteLock lock = new ReentrantReadWriteLock();
+
+    /**
+     * If no threads have locked the ReadWriteLock for writing,
+     * and no thread have requested a write lock,
+     * multiple threads can lock the lock for reading.
+     */
+    private final Lock readLock = lock.readLock();
+
+    /**
+     * If no threads are reading or writing,
+     * only one thread at a time can lock the lock for writing.
+     */
+    private final Lock writeLock = lock.writeLock();
 
     /**
      * Constructs an empty list with the DEFAULT_INITIAL_CAPACITY
@@ -75,7 +97,13 @@ public class ArrayListImpl<T> extends AbstractList<T>
      */
     @Override
     public int size() {
-        return size;
+        readLock.lock();
+        try{
+            return size;
+        } finally {
+            readLock.unlock();
+        }
+
     }
 
     /**
@@ -85,7 +113,13 @@ public class ArrayListImpl<T> extends AbstractList<T>
      */
     @Override
     public boolean isEmpty() {
-        return size == 0;
+        readLock.lock();
+        try {
+            return size == 0;
+        } finally {
+            readLock.unlock();
+        }
+
     }
 
     /**
@@ -96,7 +130,13 @@ public class ArrayListImpl<T> extends AbstractList<T>
      */
     @Override
     public boolean contains(Object o) {
-        return indexOf(o) >= 0;
+        readLock.lock();
+        try {
+            return indexOf(o) >= 0;
+        } finally {
+            readLock.unlock();
+        }
+
     }
 
     /**
@@ -106,7 +146,13 @@ public class ArrayListImpl<T> extends AbstractList<T>
      */
     @Override
     public Iterator<T> iterator() {
-        return new Itr();
+        readLock.lock();
+        try {
+            return new Itr();
+        } finally {
+            readLock.unlock();
+        }
+
     }
 
     /**
@@ -118,7 +164,12 @@ public class ArrayListImpl<T> extends AbstractList<T>
      */
     @Override
     public Object[] toArray() {
-        return Arrays.copyOf(data, size);
+        readLock.lock();
+        try {
+            return Arrays.copyOf(data, size);
+        } finally {
+            readLock.unlock();
+        }
     }
 
     /**
@@ -129,9 +180,14 @@ public class ArrayListImpl<T> extends AbstractList<T>
      */
     @Override
     public boolean add(T t) {
-        ensureListSize();
-        data[size++] = t;
-        return true;
+        writeLock.lock();
+        try {
+            ensureListSize();
+            data[size++] = t;
+            return true;
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     /**
@@ -150,6 +206,7 @@ public class ArrayListImpl<T> extends AbstractList<T>
      */
     private boolean isOvercup(){
         return size == data.length;
+
     }
 
     /**
@@ -179,11 +236,16 @@ public class ArrayListImpl<T> extends AbstractList<T>
      */
     @Override
     public boolean remove(Object o) {
-        int index = indexOf(o);
-        if (index == -1) throw new IndexOutOfBoundsException();
-        leftShiftAndTrim(index);
+        writeLock.lock();
+        try {
+            int index = indexOf(o);
+            if (index == -1) throw new IndexOutOfBoundsException();
+            leftShiftAndTrim(index);
 
-        return true;
+            return true;
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     /**
@@ -207,10 +269,15 @@ public class ArrayListImpl<T> extends AbstractList<T>
      */
     @Override
     public boolean containsAll(Collection<?> c) {
-        for(Object el : c){
-            if (!contains(el)) return false;
+        readLock.lock();
+        try {
+            for (Object el : c) {
+                if (!contains(el)) return false;
+            }
+            return true;
+        } finally {
+            readLock.unlock();
         }
-        return true;
     }
 
     /**
@@ -242,12 +309,17 @@ public class ArrayListImpl<T> extends AbstractList<T>
      */
     @Override
     public boolean addAll(Collection<? extends T> c) {
-        int newSize = modifySizeToAdd(c);
-        if (newSize == size) return false;
-        System.arraycopy(c.toArray(), 0,data,
-                size, c.size());
-        size = newSize;
-        return true;
+        writeLock.lock();
+        try {
+            int newSize = modifySizeToAdd(c);
+            if (newSize == size) return false;
+            System.arraycopy(c.toArray(), 0, data,
+                    size, c.size());
+            size = newSize;
+            return true;
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     /**
@@ -262,15 +334,20 @@ public class ArrayListImpl<T> extends AbstractList<T>
      */
     @Override
     public boolean addAll(int index, Collection<? extends T> c) {
-        if (!isValidIndex(index)) throw new IllegalArgumentException("invalid index");
-        int newSize = modifySizeToAdd(c);
-        if (newSize == size) return false;
-        Object[] array = new Object[size - index];
-        System.arraycopy(data, index, array, 0, size - index);
-        System.arraycopy(c.toArray(), 0, data, index, c.size());
-        System.arraycopy(array, 0, data, index + c.size(), array.length);
-        size = newSize;
-        return true;
+        writeLock.lock();
+        try {
+            if (!isValidIndex(index)) throw new IllegalArgumentException("invalid index");
+            int newSize = modifySizeToAdd(c);
+            if (newSize == size) return false;
+            Object[] array = new Object[size - index];
+            System.arraycopy(data, index, array, 0, size - index);
+            System.arraycopy(c.toArray(), 0, data, index, c.size());
+            System.arraycopy(array, 0, data, index + c.size(), array.length);
+            size = newSize;
+            return true;
+        } finally {
+            writeLock.unlock();
+        }
     }
 
 //    @Override
@@ -296,7 +373,12 @@ public class ArrayListImpl<T> extends AbstractList<T>
     @Override
     @SuppressWarnings("unchecked")
     public void sort(Comparator<? super T> c) {
-        Arrays.sort((T[]) data, 0, size, c);
+        writeLock.lock();
+        try {
+            Arrays.sort((T[]) data, 0, size, c);
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     /**
@@ -305,8 +387,13 @@ public class ArrayListImpl<T> extends AbstractList<T>
      */
     @Override
     public void clear() {
-        for (int to = size, i = size = 0; i < to; i++)
-            data[i] = null;
+        writeLock.lock();
+        try {
+            for (int to = size, i = size = 0; i < to; i++)
+                data[i] = null;
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     /**
@@ -318,8 +405,13 @@ public class ArrayListImpl<T> extends AbstractList<T>
     @Override
     @SuppressWarnings("unchecked")
     public T get(int index) {
-        if (!isValidIndex(index)) throw new IllegalArgumentException("invalid index");
-        return (T)data[index];
+        readLock.lock();
+        try {
+            if (!isValidIndex(index)) throw new IllegalArgumentException("invalid index");
+            return (T) data[index];
+        } finally {
+            readLock.unlock();
+        }
     }
 
     /**
@@ -333,9 +425,14 @@ public class ArrayListImpl<T> extends AbstractList<T>
     @Override
     @SuppressWarnings("unchecked")
     public T set(int index, T element) {
-        if (!isValidIndex(index)) throw new IllegalArgumentException("invalid index");
-        data[index] = element;
-        return (T)data[index];
+        writeLock.lock();
+        try {
+            if (!isValidIndex(index)) throw new IllegalArgumentException("invalid index");
+            data[index] = element;
+            return (T) data[index];
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     /**
@@ -347,11 +444,16 @@ public class ArrayListImpl<T> extends AbstractList<T>
      */
     @Override
     public void add(int index, T element) {
-        if (!isValidIndex(index)) throw new IllegalArgumentException("invalid index");
-        ensureListSize();
-        System.arraycopy(data, index, data, index + 1, size - index);
-        data[index] = element;
-        ++size;
+        writeLock.lock();
+        try {
+            if (!isValidIndex(index)) throw new IllegalArgumentException("invalid index");
+            ensureListSize();
+            System.arraycopy(data, index, data, index + 1, size - index);
+            data[index] = element;
+            ++size;
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     /**
@@ -364,10 +466,15 @@ public class ArrayListImpl<T> extends AbstractList<T>
     @Override
     @SuppressWarnings("unchecked")
     public T remove(int index) {
-        if (!isValidIndex(index)) throw new IllegalArgumentException("invalid index");
-        Object object = data[index];
-        leftShiftAndTrim(index);
-        return (T)object;
+        writeLock.lock();
+        try {
+            if (!isValidIndex(index)) throw new IllegalArgumentException("invalid index");
+            Object object = data[index];
+            leftShiftAndTrim(index);
+            return (T) object;
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     /**
@@ -386,7 +493,12 @@ public class ArrayListImpl<T> extends AbstractList<T>
      */
     @Override
     public int indexOf(Object o) {
-        return indexOfInRange(o, 0, size);
+        readLock.lock();
+        try {
+            return indexOfInRange(o, 0, size);
+        } finally {
+            readLock.unlock();
+        }
     }
 
     /**
@@ -420,6 +532,7 @@ public class ArrayListImpl<T> extends AbstractList<T>
      *
      * @param objects array of objects list to be initialized with
      */
+    @SafeVarargs
     static <T> List<T> of(T... objects) {
         List<T> list = new ArrayListImpl<>();
         list.addAll(Arrays.asList(objects));
