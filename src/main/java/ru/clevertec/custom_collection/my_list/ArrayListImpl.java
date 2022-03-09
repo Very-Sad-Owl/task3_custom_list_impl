@@ -2,6 +2,7 @@ package ru.clevertec.custom_collection.my_list;
 
 import java.io.Serializable;
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * <p>Created as Task 3 for Clevertec.</p>

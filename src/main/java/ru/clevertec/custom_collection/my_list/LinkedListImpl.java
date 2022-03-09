@@ -22,6 +22,7 @@ import java.util.function.UnaryOperator;
 public class LinkedListImpl<T> extends AbstractSequentialList<T>
         implements List<T>, Deque<T>, Cloneable, Serializable {
 
+    private static final long serialVersionUID = 1L;
     /**
      * Current size of the list.
      */
