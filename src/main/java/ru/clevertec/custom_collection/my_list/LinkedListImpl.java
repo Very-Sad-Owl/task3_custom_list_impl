@@ -895,7 +895,6 @@ public class LinkedListImpl<T> extends AbstractSequentialList<T>
     }
 
     private boolean deleteNode(Node<T> node) {
-        if (node.nextNode == null && node.previousNode == null) return false;
         Node<T> prevElement = node.nextNode;
         Node<T> nextElement = node.previousNode;
         if (prevElement != null) {

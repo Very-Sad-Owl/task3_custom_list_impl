@@ -2,7 +2,6 @@ package ru.clevertec.custom_collection.my_list;
 
 import java.io.Serializable;
 import java.util.*;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -205,8 +204,12 @@ public class ArrayListImpl<T> extends AbstractList<T>
      * @return {@code true} if size reaches capacity's limit)
      */
     private boolean isOvercup(){
-        return size == data.length;
-
+        readLock.lock();
+        try {
+            return size == data.length;
+        } finally {
+            readLock.unlock();
+        }
     }
 
     /**
@@ -223,7 +226,12 @@ public class ArrayListImpl<T> extends AbstractList<T>
      * @param appendSize the desired capacity
      */
     private void grow(int appendSize){
-        data = Arrays.copyOf(data, size + appendSize);
+        writeLock.lock();
+        try {
+            data = Arrays.copyOf(data, data.length + appendSize);
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     /**
